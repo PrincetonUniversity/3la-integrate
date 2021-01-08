@@ -144,7 +144,60 @@ RUN HEADER0="-isystem$SIM_TEST_DIR/ac_include" && \
 ##
 ## Build TVM/BYOC
 ##
-#TODO
+FROM ubuntu:bionic as tvmbuilder
+LABEL stage=intermediate
+
+# var
+ENV WORK_ROOT /root
+ENV VIRTUAL_ENV 3laEnv
+ENV BUILD_PREF $WORK_ROOT/$VIRTUAL_ENV
+RUN mkdir -p $BUILD_PREF
+
+# required packages
+RUN apt update && DEBIAN_FRONTEND=noninteractive apt install --yes --no-install-recommends \
+    ca-certificates \
+    openssh-client \
+    git \
+    python3 \
+    python3-dev \
+    python3-pip \
+    python3-setuptools \
+    libtinfo-dev \
+    zlib1g-dev \
+    build-essential \
+    cmake \
+    libedit-dev \
+    libxml2-dev \
+    llvm \
+    clang \
+    && rm -rf /var/lib/apt/lists/*
+
+# setup local build via virtualenv
+WORKDIR $WORK_ROOT
+RUN pip3 install virtualenv
+RUN virtualenv $VIRTUAL_ENV
+RUN $BUILD_PREF/bin/pip3 install numpy decorator attrs scipy pytest
+
+# to access private repo
+ARG SSH_KEY
+RUN eval "$(ssh-agent -s)"
+RUN mkdir -p /root/.ssh/ && \
+    echo "$SSH_KEY" > /root/.ssh/id_rsa && \
+    chmod -R 600 /root/.ssh/ && \
+    ssh-keyscan -t rsa github.com >> ~/.ssh/known_hosts
+
+# 3la-tvm
+ENV TVM_DIR $WORK_ROOT/3la-tvm
+WORKDIR $WORK_ROOT
+RUN git clone git@github.com:Bo-Yuan-Huang/3la-tvm.git $TVM_DIR
+WORKDIR $TVM_DIR
+RUN git submodule init && \
+    git submodule update
+RUN mkdir -p build && \
+    cp cmake/config.cmake build
+WORKDIR $TVM_DIR/build
+RUN cmake $TVM_DIR && \
+    make -j"$(nproc)"
 
 ##
 ## Deployment
@@ -154,12 +207,21 @@ FROM ubuntu:bionic
 RUN apt update && DEBIAN_FRONTEND=noninteractive apt install --yes --no-install-recommends \
     python3 \
     python3-pip \
+    libtinfo-dev \
+    zlib1g-dev \
+    libedit-dev \
+    libxml2-dev \
+    llvm \
+    clang \
     && rm -rf /var/lib/apt/lists/*
 
 # setup env
 ENV VIRTUAL_ENV 3laEnv
 ENV BUILD_PREF /root/$VIRTUAL_ENV
+ENV TVM_DIR /root/3la-tvm
 COPY --from=ilabuilder $BUILD_PREF $BUILD_PREF
+COPY --from=tvmbuilder $BUILD_PREF $BUILD_PREF
+COPY --from=tvmbuilder $TVM_DIR $TVM_DIR
 
 # fetch ILA simulator
 COPY --from=ilabuilder /root/vta-ila/build/sim_model/build/vta $BUILD_PREF/bin/vta_ila_sim
@@ -174,4 +236,5 @@ COPY --from=ilabuilder /root/3la_sim_testbench/flexnlp/sim_driver/prog_frag $EXM
 # init
 WORKDIR /root
 RUN echo "source /root/$VIRTUAL_ENV/bin/activate" >> init.sh
+RUN echo "export PYTHONPATH=$TVM_DIR/python:${PYTHONPATH}" >> init.sh
 CMD echo "run 'source init.sh' to start" && /bin/bash
