@@ -1,8 +1,7 @@
 ##
 ## Build ILA models and their SystemC simulator
 ##
-FROM ubuntu:bionic as ilabuilder
-LABEL stage=intermediate
+FROM ubuntu:bionic as builder
 
 # var
 ENV WORK_ROOT /root
@@ -22,9 +21,21 @@ RUN apt update && DEBIAN_FRONTEND=noninteractive apt install --yes --no-install-
     libz3-dev \
     openssh-client \
     python3 \
+    python3-dev \
     python3-pip \
+    python3-setuptools \
     wget \
     z3 \
+    libtinfo-dev \
+    zlib1g-dev \
+    libedit-dev \
+    libxml2-dev \
+    llvm \
+    llvm-dev \
+    clang \
+    clang-format \
+    vim \
+    tmux \
     && rm -rf /var/lib/apt/lists/*
 
 # setup local build via virtualenv
@@ -66,7 +77,7 @@ RUN git clone --depth=1 git@github.com:LeeOHzzZ/3la_sim_testbench.git $SIM_TEST_
 # ILAng
 ENV ILANG_DIR $WORK_ROOT/ILAng
 WORKDIR $WORK_ROOT
-ADD https://api.github.com/repos/PrincetonUniveristy/ILAng/git/refs/heads/master ilang_version.json
+ADD https://api.github.com/repos/PrincetonUniversity/ILAng/git/refs/heads/master ilang_version.json
 RUN git clone --depth=1 https://github.com/PrincetonUniversity/ILAng.git $ILANG_DIR
 WORKDIR $ILANG_DIR
 RUN mkdir -p build 
@@ -99,6 +110,7 @@ RUN HEADER="-isystem$SIM_TEST_DIR/vta/ap_include" && \
       -DCMAKE_PREFIX_PATH=$BUILD_PREF \
       -DCMAKE_CXX_FLAGS=$HEADER && \
     make -j"$(nproc)"
+RUN cp vta $BUILD_PREF/bin/vta_ila_sim
 
 # FlexNLP
 ENV FLEX_NLP_DIR $WORK_ROOT/FlexNLP
@@ -140,52 +152,10 @@ RUN HEADER0="-isystem$SIM_TEST_DIR/ac_include" && \
       -DCMAKE_CXX_COMPILER=g++-5 \
       -DCMAKE_CXX_FLAGS="$HEADER0 $HEADER1 $HEADER2 $HEADER3 $HEADER4 $DEF0 $DEF1 $DEF2" && \
     make -j"$(nproc)"
+RUN cp flex $BUILD_PREF/bin/flexnlp_ila_sim
 
-##
-## Build TVM/BYOC
-##
-FROM ubuntu:bionic as tvmbuilder
-LABEL stage=intermediate
-
-# var
-ENV WORK_ROOT /root
-ENV VIRTUAL_ENV 3laEnv
-ENV BUILD_PREF $WORK_ROOT/$VIRTUAL_ENV
-RUN mkdir -p $BUILD_PREF
-
-# required packages
-RUN apt update && DEBIAN_FRONTEND=noninteractive apt install --yes --no-install-recommends \
-    ca-certificates \
-    openssh-client \
-    git \
-    python3 \
-    python3-dev \
-    python3-pip \
-    python3-setuptools \
-    libtinfo-dev \
-    zlib1g-dev \
-    build-essential \
-    cmake \
-    libedit-dev \
-    libxml2-dev \
-    llvm \
-    llvm-dev \
-    clang \
-    && rm -rf /var/lib/apt/lists/*
-
-# setup local build via virtualenv
-WORKDIR $WORK_ROOT
-RUN pip3 install virtualenv
-RUN virtualenv $VIRTUAL_ENV
+# packages
 RUN $BUILD_PREF/bin/pip3 install numpy decorator attrs scipy pytest
-
-# to access private repo
-ARG SSH_KEY
-RUN eval "$(ssh-agent -s)"
-RUN mkdir -p /root/.ssh/ && \
-    echo "$SSH_KEY" > /root/.ssh/id_rsa && \
-    chmod -R 600 /root/.ssh/ && \
-    ssh-keyscan -t rsa github.com >> ~/.ssh/known_hosts
 
 # 3la-tvm
 ENV TVM_DIR $WORK_ROOT/3la-tvm
@@ -198,43 +168,8 @@ RUN mkdir -p build && \
     cp cmake/config.cmake build && \
     echo "set(USE_LLVM llvm-config)" >> build/config.cmake
 WORKDIR $TVM_DIR/build
-RUN cmake $TVM_DIR -DUSE_ILAVTA_CODEGEN=ON -DUSE_ILAFLEX_CODEGEN=ON && \
+RUN $CMAKE_DIR/bin/cmake $TVM_DIR -DUSE_ILAVTA_CODEGEN=ON -DUSE_ILAFLEX_CODEGEN=ON && \
     make -j"$(nproc)"
-
-##
-## Deployment
-##
-FROM ubuntu:bionic
-
-RUN apt update && DEBIAN_FRONTEND=noninteractive apt install --yes --no-install-recommends \
-    python3 \
-    python3-pip \
-    libtinfo-dev \
-    zlib1g-dev \
-    libedit-dev \
-    libxml2-dev \
-    llvm \
-    llvm-dev \
-    clang \
-    && rm -rf /var/lib/apt/lists/*
-
-# setup env
-ENV VIRTUAL_ENV 3laEnv
-ENV BUILD_PREF /root/$VIRTUAL_ENV
-ENV TVM_DIR /root/3la-tvm
-COPY --from=ilabuilder $BUILD_PREF $BUILD_PREF
-COPY --from=tvmbuilder $BUILD_PREF $BUILD_PREF
-COPY --from=tvmbuilder $TVM_DIR $TVM_DIR
-
-# fetch ILA simulator
-COPY --from=ilabuilder /root/vta-ila/build/sim_model/build/vta $BUILD_PREF/bin/vta_ila_sim
-COPY --from=ilabuilder /root/flexnlp-ila/build/sim_model/build/flex $BUILD_PREF/bin/flexnlp_ila_sim
-
-# fetch example testbench
-ENV EXM_PROG /root/testbench
-RUN mkdir -p $EXM_PROG
-COPY --from=ilabuilder /root/3la_sim_testbench/vta/prog_frag $EXM_PROG/vta
-COPY --from=ilabuilder /root/3la_sim_testbench/flexnlp/sim_driver/prog_frag $EXM_PROG/flexnlp
 
 # init
 WORKDIR /root
