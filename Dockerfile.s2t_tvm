@@ -1,0 +1,59 @@
+FROM ubuntu:bionic as builder
+
+# var
+ENV WORK_ROOT /root
+ENV VIRTUAL_ENV 3laEnv
+ENV BUILD_PREF $WORK_ROOT/$VIRTUAL_ENV
+RUN mkdir -p $BUILD_PREF
+
+# required packages
+RUN apt update && DEBIAN_FRONTEND=noninteractive apt install --yes --no-install-recommends \
+    build-essential \
+    cmake \
+    git \
+    python3 \
+    python3-dev \
+    python3-pip \
+    python3-setuptools \
+    libtinfo-dev \
+    zlib1g-dev \
+    libedit-dev \
+    libxml2-dev \
+    llvm \
+    llvm-dev \
+    clang \
+    && rm -rf /var/lib/apt/lists/*
+
+# setup local build via virtualenv
+WORKDIR $WORK_ROOT
+RUN pip3 install virtualenv
+RUN virtualenv $VIRTUAL_ENV
+RUN $BUILD_PREF/bin/pip3 install numpy decorator attrs scipy pytest tensorflow
+
+# tvm
+ENV TVM_DIR $WORK_ROOT/3la-tvm
+WORKDIR $WORK_ROOT
+RUN git clone https://github.com/apache/tvm.git $TVM_DIR
+WORKDIR $TVM_DIR
+RUN git submodule init && \
+    git submodule update
+RUN mkdir -p build && \
+    cp cmake/config.cmake build && \
+    echo "set(USE_LLVM llvm-config)" >> build/config.cmake
+WORKDIR $TVM_DIR/build
+RUN cmake $TVM_DIR && \
+    make -j"$(nproc)"
+
+# files
+WORKDIR $WORK_ROOT
+RUN mkdir sandbox
+WORKDIR $WORK_ROOT/sandbox
+COPY tests/end_to_end_speech_to_text.py s2t.py
+COPY tests/model_lstm_256.h5 model.h5
+
+# init
+WORKDIR /root
+RUN echo "source /root/$VIRTUAL_ENV/bin/activate" >> init.sh
+RUN echo "export PYTHONPATH=$TVM_DIR/python:${PYTHONPATH}" >> init.sh
+RUN echo "cd /root/sandbox" >> init.sh
+CMD echo "run 'source init.sh' to start" && /bin/bash
