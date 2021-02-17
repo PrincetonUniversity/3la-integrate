@@ -171,6 +171,10 @@ WORKDIR $TVM_DIR/build
 RUN $CMAKE_DIR/bin/cmake $TVM_DIR -DUSE_ILAVTA_CODEGEN=ON -DUSE_ILAFLEX_CODEGEN=ON && \
     make -j"$(nproc)"
 
+# 3la-vta-testbench
+WORKDIR $WORK_ROOT
+RUN git clone git@github.com:uwsampl/3la-vta-testbench.git --recursive
+
 # init
 WORKDIR /root
 RUN echo "source /root/$VIRTUAL_ENV/bin/activate" >> init.sh
