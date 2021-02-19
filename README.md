@@ -22,6 +22,11 @@ To remove intermediate images (licensed packages and your private keys):
 docker rmi -f $(docker images -q --filter label=stage=intermediate)
 ```
 
-## TODO
+## Examples
 
-The TVM part is now building a previous fork as a placeholder. Replace the link and add options/flags as needed for the 3LA-capable TVM.
+Run the speech-to-text example with FlexNLP linear layer (simulation):
+
+``` bash
+docker run byo3la /bin/bash /root/scripts/run_speech_to_text.sh
+```
+

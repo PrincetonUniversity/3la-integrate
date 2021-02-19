@@ -50,6 +50,15 @@ RUN $CMAKE_DIR/bin/cmake $SYSC_DIR -DCMAKE_INSTALL_PREFIX=$BUILD_PREF -DCMAKE_CX
     make -j"$(nproc)" && \
     make install 
 
+# boost
+ENV BOOST_DIR $WORK_ROOT/boost_1_75_0
+WORKDIR $WORK_ROOT
+RUN wget https://dl.bintray.com/boostorg/release/1.75.0/source/boost_1_75_0.tar.gz
+RUN tar zxvf boost_1_75_0.tar.gz
+WORKDIR $BOOST_DIR
+RUN ./bootstrap.sh --prefix=$BUILD_PREF
+RUN ./b2 --with-chrono --with-math --with-system install -j"$(nproc)" || :
+
 # to access private repo
 ARG SSH_KEY
 RUN eval "$(ssh-agent -s)"
@@ -62,11 +71,18 @@ RUN mkdir -p /root/.ssh/ && \
 ENV SIM_TEST_DIR $WORK_ROOT/3la_sim_testbench
 WORKDIR $WORK_ROOT
 RUN git clone --depth=1 git@github.com:LeeOHzzZ/3la_sim_testbench.git $SIM_TEST_DIR
+WORKDIR $SIM_TEST_DIR
+RUN git submodule init && \
+    git submodule update tool/numcpp
+
+# 3la_ILA_tensor_op
+ENV ILA_TENSOR_OP_DIR $WORK_ROOT/3la_ILA_tensor_op
+WORKDIR $WORK_ROOT
+RUN git clone --depth=1 git@github.com:LeeOHzzZ/3la_ILA_tensor_op.git $ILA_TENSOR_OP_DIR
 
 # ILAng
 ENV ILANG_DIR $WORK_ROOT/ILAng
 WORKDIR $WORK_ROOT
-ADD https://api.github.com/repos/PrincetonUniveristy/ILAng/git/refs/heads/master ilang_version.json
 RUN git clone --depth=1 https://github.com/PrincetonUniversity/ILAng.git $ILANG_DIR
 WORKDIR $ILANG_DIR
 RUN mkdir -p build 
@@ -140,6 +156,42 @@ RUN HEADER0="-isystem$SIM_TEST_DIR/ac_include" && \
       -DCMAKE_CXX_COMPILER=g++-5 \
       -DCMAKE_CXX_FLAGS="$HEADER0 $HEADER1 $HEADER2 $HEADER3 $HEADER4 $DEF0 $DEF1 $DEF2" && \
     make -j"$(nproc)"
+RUN cp flex $BUILD_PREF/bin/flexnlp_ila_sim_driver
+
+# asm_sim_driver
+WORKDIR $FLEX_SIM_DIR/build
+RUN cp $SIM_TEST_DIR/flexnlp/sim_driver/asm_sim_driver.cc $FLEX_SIM_DIR/app/main.cc
+RUN make -j"$(nproc)"
+RUN cp flex $BUILD_PREF/bin/flexnlp_ila_asm_sim_driver
+
+# adpfloat_to_float
+WORKDIR $SIM_TEST_DIR/flexnlp/sim_driver/tool
+RUN g++-5 adpfloat_to_float.cc -o adpfloat_to_float \
+    -I/root/3laEnv/include \
+    -I/root/3la_sim_testbench/ac_include \
+    -I/root/FlexNLP/cmod/include \
+    -I/root/FlexNLP/matchlib/cmod/include \
+    -I/root/FlexNLP/matchlib/rapidjson/include \
+    -I/root/FlexNLP/matchlib/connections/include \
+    -DSC_INCLUDE_DYNAMIC_PROCESSES -DCONNECTIONS_ACCURATE_SIM -DHLS_CATAPULT \
+    -std=c++11 -lstdc++ -lsystemc -lm -lpthread \
+    -L/root/3laEnv/lib
+RUN cp adpfloat_to_float $BUILD_PREF/bin/adpfloat_to_float
+
+# float_to_adpfloat
+WORKDIR $SIM_TEST_DIR/flexnlp/sim_driver/tool
+RUN g++-5 float_to_adpfloat.cc -o float_to_adpfloat \
+    -I/root/3laEnv/include \
+    -I/root/3la_sim_testbench/ac_include \
+    -I/root/FlexNLP/cmod/include \
+    -I/root/FlexNLP/matchlib/cmod/include \
+    -I/root/FlexNLP/matchlib/rapidjson/include \
+    -I/root/FlexNLP/matchlib/connections/include \
+    -I/root/3la_sim_testbench/tool/numcpp/include \
+    -DSC_INCLUDE_DYNAMIC_PROCESSES -DCONNECTIONS_ACCURATE_SIM -DHLS_CATAPULT \
+    -std=c++11 -lstdc++ -lsystemc -lm -lpthread \
+    -L/root/3laEnv/lib
+RUN cp float_to_adpfloat $BUILD_PREF/bin/float_to_adpfloat
 
 ##
 ## Build TVM/BYOC
@@ -177,7 +229,7 @@ RUN apt update && DEBIAN_FRONTEND=noninteractive apt install --yes --no-install-
 WORKDIR $WORK_ROOT
 RUN pip3 install virtualenv
 RUN virtualenv $VIRTUAL_ENV
-RUN $BUILD_PREF/bin/pip3 install numpy decorator attrs scipy pytest
+RUN $BUILD_PREF/bin/pip3 install numpy decorator attrs scipy pytest tensorflow
 
 # to access private repo
 ARG SSH_KEY
@@ -198,8 +250,8 @@ RUN mkdir -p build && \
     cp cmake/config.cmake build && \
     echo "set(USE_LLVM llvm-config)" >> build/config.cmake
 WORKDIR $TVM_DIR/build
-RUN cmake $TVM_DIR -DUSE_ILAVTA_CODEGEN=ON -DUSE_ILAFLEX_CODEGEN=ON && \
-    make -j"$(nproc)"
+RUN cmake $TVM_DIR -DUSE_ILAVTA_CODEGEN=ON -DUSE_ILAFLEX_CODEGEN=ON -DCMAKE_INSTALL_PREFIX=$BUILD_PREF && \
+    make install -j"$(nproc)"
 
 ##
 ## Deployment
@@ -222,22 +274,33 @@ RUN apt update && DEBIAN_FRONTEND=noninteractive apt install --yes --no-install-
 ENV VIRTUAL_ENV 3laEnv
 ENV BUILD_PREF /root/$VIRTUAL_ENV
 ENV TVM_DIR /root/3la-tvm
-COPY --from=ilabuilder $BUILD_PREF $BUILD_PREF
-COPY --from=tvmbuilder $BUILD_PREF $BUILD_PREF
-COPY --from=tvmbuilder $TVM_DIR $TVM_DIR
+COPY --from=ilabuilder $BUILD_PREF/pyvenv.cfg $BUILD_PREF/pyvenv.cfg
+COPY --from=ilabuilder $BUILD_PREF/bin $BUILD_PREF/bin
+COPY --from=ilabuilder $BUILD_PREF/lib $BUILD_PREF/lib
+COPY --from=tvmbuilder $BUILD_PREF/bin $BUILD_PREF/bin
+COPY --from=tvmbuilder $BUILD_PREF/lib $BUILD_PREF/lib
+COPY --from=tvmbuilder $TVM_DIR/python $TVM_DIR/python
 
-# fetch ILA simulator
-COPY --from=ilabuilder /root/vta-ila/build/sim_model/build/vta $BUILD_PREF/bin/vta_ila_sim
-COPY --from=ilabuilder /root/flexnlp-ila/build/sim_model/build/flex $BUILD_PREF/bin/flexnlp_ila_sim
+# test files
+WORKDIR /root
+RUN mkdir -p tests
+RUN mkdir -p scripts
+COPY tests/end_to_end_speech_to_text_with_3la.py /root/tests/speech_to_text.py
+COPY tests/model_lstm_256.h5 /root/tests/model.h5
+COPY scripts/run_speech_to_text.sh /root/scripts/run_speech_to_text.sh
 
-# fetch example testbench
-ENV EXM_PROG /root/testbench
-RUN mkdir -p $EXM_PROG
-COPY --from=ilabuilder /root/3la_sim_testbench/vta/prog_frag $EXM_PROG/vta
-COPY --from=ilabuilder /root/3la_sim_testbench/flexnlp/sim_driver/prog_frag $EXM_PROG/flexnlp
+# FIXME temporary setup
+WORKDIR /root
+ENV ASM_TMP /root/asm_incubator
+COPY --from=ilabuilder /root/3la_ILA_tensor_op/flexnlp $ASM_TMP/flexnlp
+RUN cp $BUILD_PREF/bin/float_to_adpfloat $ASM_TMP/flexnlp/tool/float_to_adpfloat.out
+RUN cp $BUILD_PREF/bin/adpfloat_to_float $ASM_TMP/flexnlp/tool/adpfloat_to_float.out
+RUN cp $BUILD_PREF/bin/flexnlp_ila_asm_sim_driver $ASM_TMP/flexnlp/tool/asm_sim_driver.out
+RUN mkdir $ASM_TMP/flexnlp/data
 
 # init
 WORKDIR /root
 RUN echo "source /root/$VIRTUAL_ENV/bin/activate" >> init.sh
 RUN echo "export PYTHONPATH=$TVM_DIR/python:${PYTHONPATH}" >> init.sh
+RUN echo "export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/root/3laEnv/lib" >> init.sh
 CMD echo "run 'source init.sh' to start" && /bin/bash
