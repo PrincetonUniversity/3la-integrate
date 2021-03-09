@@ -94,7 +94,6 @@ RUN git clone --depth=1 git@github.com:LeeOHzzZ/3la_ILA_tensor_op.git $ILA_TENSO
 # ILAng
 ENV ILANG_DIR $WORK_ROOT/ILAng
 WORKDIR $WORK_ROOT
-ADD https://api.github.com/repos/PrincetonUniversity/ILAng/git/refs/heads/master ilang_version.json
 RUN git clone --depth=1 https://github.com/PrincetonUniversity/ILAng.git $ILANG_DIR
 WORKDIR $ILANG_DIR
 RUN mkdir -p build 
@@ -169,13 +168,13 @@ RUN HEADER0="-isystem$SIM_TEST_DIR/ac_include" && \
       -DCMAKE_CXX_COMPILER=g++-5 \
       -DCMAKE_CXX_FLAGS="$HEADER0 $HEADER1 $HEADER2 $HEADER3 $HEADER4 $DEF0 $DEF1 $DEF2" && \
     make -j"$(nproc)"
-RUN cp flex $BUILD_PREF/bin/flexnlp_ila_sim_driver
+# RUN cp flex $BUILD_PREF/bin/flexnlp_ila_sim_driver
 
 # asm_sim_driver
 WORKDIR $FLEX_SIM_DIR/build
 RUN cp $SIM_TEST_DIR/flexnlp/sim_driver/asm_sim_driver.cc $FLEX_SIM_DIR/app/main.cc
 RUN make -j"$(nproc)"
-RUN cp flex $BUILD_PREF/bin/flexnlp_ila_asm_sim_driver
+RUN cp flex $BUILD_PREF/bin/flex_asm_sim_driver
 
 # adpfloat_to_float
 WORKDIR $SIM_TEST_DIR/flexnlp/sim_driver/tool
@@ -234,16 +233,10 @@ WORKDIR $WORK_ROOT/tests
 COPY tests/end_to_end_speech_to_text_with_3la.py speech_to_text.py
 COPY tests/model_lstm_256.h5 model.h5
 
-# TODO make it more portable
-WORKDIR $WORK_ROOT
-RUN cp $BUILD_PREF/bin/float_to_adpfloat $ILA_TENSOR_OP_DIR/flexnlp/tool/float_to_adpfloat.out
-RUN cp $BUILD_PREF/bin/adpfloat_to_float $ILA_TENSOR_OP_DIR/flexnlp/tool/adpfloat_to_float.out
-RUN cp $BUILD_PREF/bin/flexnlp_ila_asm_sim_driver $ILA_TENSOR_OP_DIR/flexnlp/tool/asm_sim_driver.out
-RUN mkdir $ILA_TENSOR_OP_DIR/flexnlp/data
-
 # init
 WORKDIR /root
 RUN echo "source /root/$VIRTUAL_ENV/bin/activate" >> init.sh
 RUN echo "export PYTHONPATH=$TVM_DIR/python:${PYTHONPATH}" >> init.sh
+RUN echo "export PY_3LA_DRIVER=/root/3la_ILA_tensor_op/" >> init.sh
 RUN echo "export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/root/3laEnv/lib" >> init.sh
 CMD echo "run 'source init.sh' to start" && /bin/bash

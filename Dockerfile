@@ -87,7 +87,8 @@ RUN git clone --depth=1 https://github.com/PrincetonUniversity/ILAng.git $ILANG_
 WORKDIR $ILANG_DIR
 RUN mkdir -p build 
 WORKDIR $ILANG_DIR/build
-RUN $CMAKE_DIR/bin/cmake $ILANG_DIR -DCMAKE_INSTALL_PREFIX=$BUILD_PREF && \
+# RUN $CMAKE_DIR/bin/cmake $ILANG_DIR -DCMAKE_INSTALL_PREFIX=$BUILD_PREF && \
+RUN $CMAKE_DIR/bin/cmake $ILANG_DIR && \
     make -j"$(nproc)" && \
     make install 
 
@@ -156,13 +157,13 @@ RUN HEADER0="-isystem$SIM_TEST_DIR/ac_include" && \
       -DCMAKE_CXX_COMPILER=g++-5 \
       -DCMAKE_CXX_FLAGS="$HEADER0 $HEADER1 $HEADER2 $HEADER3 $HEADER4 $DEF0 $DEF1 $DEF2" && \
     make -j"$(nproc)"
-RUN cp flex $BUILD_PREF/bin/flexnlp_ila_sim_driver
+# RUN cp flex $BUILD_PREF/bin/flexnlp_ila_sim_driver
 
 # asm_sim_driver
 WORKDIR $FLEX_SIM_DIR/build
 RUN cp $SIM_TEST_DIR/flexnlp/sim_driver/asm_sim_driver.cc $FLEX_SIM_DIR/app/main.cc
 RUN make -j"$(nproc)"
-RUN cp flex $BUILD_PREF/bin/flexnlp_ila_asm_sim_driver
+RUN cp flex $BUILD_PREF/bin/flex_asm_sim_driver
 
 # adpfloat_to_float
 WORKDIR $SIM_TEST_DIR/flexnlp/sim_driver/tool
@@ -250,7 +251,9 @@ RUN mkdir -p build && \
     cp cmake/config.cmake build && \
     echo "set(USE_LLVM llvm-config)" >> build/config.cmake
 WORKDIR $TVM_DIR/build
-RUN cmake $TVM_DIR -DUSE_ILAVTA_CODEGEN=ON -DUSE_ILAFLEX_CODEGEN=ON -DCMAKE_INSTALL_PREFIX=$BUILD_PREF && \
+RUN cmake $TVM_DIR \
+      -DUSE_ILAVTA_CODEGEN=ON -DUSE_ILAFLEX_CODEGEN=ON \
+      -DCMAKE_INSTALL_PREFIX=$BUILD_PREF && \
     make install -j"$(nproc)"
 
 ##
@@ -273,13 +276,13 @@ RUN apt update && DEBIAN_FRONTEND=noninteractive apt install --yes --no-install-
 # setup env
 ENV VIRTUAL_ENV 3laEnv
 ENV BUILD_PREF /root/$VIRTUAL_ENV
-ENV TVM_DIR /root/3la-tvm
 COPY --from=ilabuilder $BUILD_PREF/pyvenv.cfg $BUILD_PREF/pyvenv.cfg
 COPY --from=ilabuilder $BUILD_PREF/bin $BUILD_PREF/bin
 COPY --from=ilabuilder $BUILD_PREF/lib $BUILD_PREF/lib
+COPY --from=ilabuilder /root/3la_ILA_tensor_op /root/3la_ILA_tensor_op
 COPY --from=tvmbuilder $BUILD_PREF/bin $BUILD_PREF/bin
 COPY --from=tvmbuilder $BUILD_PREF/lib $BUILD_PREF/lib
-COPY --from=tvmbuilder $TVM_DIR/python $TVM_DIR/python
+COPY --from=tvmbuilder /root/3la-tvm/python /root/3la-tvm/python
 
 # test files
 WORKDIR /root
@@ -289,18 +292,10 @@ COPY tests/end_to_end_speech_to_text_with_3la.py /root/tests/speech_to_text.py
 COPY tests/model_lstm_256.h5 /root/tests/model.h5
 COPY scripts/run_speech_to_text.sh /root/scripts/run_speech_to_text.sh
 
-# FIXME temporary setup
-WORKDIR /root
-ENV ASM_TMP /root/asm_incubator
-COPY --from=ilabuilder /root/3la_ILA_tensor_op/flexnlp $ASM_TMP/flexnlp
-RUN cp $BUILD_PREF/bin/float_to_adpfloat $ASM_TMP/flexnlp/tool/float_to_adpfloat.out
-RUN cp $BUILD_PREF/bin/adpfloat_to_float $ASM_TMP/flexnlp/tool/adpfloat_to_float.out
-RUN cp $BUILD_PREF/bin/flexnlp_ila_asm_sim_driver $ASM_TMP/flexnlp/tool/asm_sim_driver.out
-RUN mkdir $ASM_TMP/flexnlp/data
-
 # init
 WORKDIR /root
 RUN echo "source /root/$VIRTUAL_ENV/bin/activate" >> init.sh
-RUN echo "export PYTHONPATH=$TVM_DIR/python:${PYTHONPATH}" >> init.sh
+RUN echo "export PYTHONPATH=/root/3la-tvm/python:${PYTHONPATH}" >> init.sh
+RUN echo "export PY_3LA_DRIVER=/root/3la_ILA_tensor_op/" >> init.sh
 RUN echo "export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/root/3laEnv/lib" >> init.sh
 CMD echo "run 'source init.sh' to start" && /bin/bash
