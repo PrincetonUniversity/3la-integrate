@@ -117,6 +117,42 @@ RUN HEADER="-isystem$SIM_TEST_DIR/vta/ap_include" && \
       -DCMAKE_CXX_FLAGS=$HEADER && \
     make -j"$(nproc)"
 
+# HLSCNN
+ENV HLSCNN_DIR $WORK_ROOT/HLSCNN_Accel
+WORKDIR $WORK_ROOT
+RUN git clone git@github.com:ttambe/HLSCNN_Accel.git $HLSCNN_DIR
+WORKDIR $HLSCNN_DIR
+RUN git submodule update --init --recursive
+
+# hlscnn-ila
+ENV CNN_ILA_DIR $WORK_ROOT/hlscnn-ila
+WORKDIR $WORK_ROOT
+RUN git clone --depth=1 https://github.com/PrincetonUniversity/hlscnn-ila.git $CNN_ILA_DIR
+WORKDIR $CNN_ILA_DIR
+RUN mkdir -p build
+WORKDIR $CNN_ILA_DIR/build
+RUN $CMAKE_DIR/bin/cmake $CNN_ILA_DIR -DCMAKE_PREFIX_PATH=$BUILD_PREF && \
+    make -j"$(nproc)" && \
+    ./hlscnn
+
+# HlsCnn-ila simulator: sim_driver 
+ENV CNN_SIM_DIR $CNN_ILA_DIR/build/sim_model
+RUN cp $SIM_TEST_DIR/hlscnn/sim_driver.cc $CNN_SIM_DIR/app/main.cc
+RUN cp $SIM_TEST_DIR/hlscnn/uninterpreted_func.cc $CNN_SIM_DIR/extern/uninterpreted_func.cc
+WORKDIR $CNN_SIM_DIR
+RUN mkdir -p build
+WORKDIR $CNN_SIM_DIR/build
+RUN HEADER0="-isystem$SIM_TEST_DIR/ac_include" && \
+    HEADER1="-isystem$HLSCNN_DIR/cmod/include" && \
+    HEADER2="-isystem$HLSCNN_DIR/cmod/harvard/top" && \
+    $CMAKE_DIR/bin/cmake $CNN_SIM_DIR \
+      -DCMAKE_PREFIX_PATH=$BUILD_PREF \
+      -DCMAKE_CXX_STANDARD=11 \
+      -DCMAKE_CXX_COMPILER=g++-5 \
+      -DCMAKE_CXX_FLAGS="$HEADER0 $HEADER1 $HEADER2" && \
+    make -j"$(nproc)"
+RUN cp hlscnn $BUILD_PREF/bin/hlscnn_sim_driver
+
 # FlexNLP
 ENV FLEX_NLP_DIR $WORK_ROOT/FlexNLP
 WORKDIR $WORK_ROOT
