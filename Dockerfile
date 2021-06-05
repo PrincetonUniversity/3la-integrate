@@ -53,7 +53,7 @@ RUN $CMAKE_DIR/bin/cmake $SYSC_DIR -DCMAKE_INSTALL_PREFIX=$BUILD_PREF -DCMAKE_CX
 # boost
 ENV BOOST_DIR $WORK_ROOT/boost_1_75_0
 WORKDIR $WORK_ROOT
-RUN wget https://dl.bintray.com/boostorg/release/1.75.0/source/boost_1_75_0.tar.gz
+RUN wget https://boostorg.jfrog.io/artifactory/main/release/1.75.0/source/boost_1_75_0.tar.gz
 RUN tar zxvf boost_1_75_0.tar.gz
 WORKDIR $BOOST_DIR
 RUN ./bootstrap.sh --prefix=$BUILD_PREF
